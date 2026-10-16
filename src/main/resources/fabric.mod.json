@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "storyboard_displays",
+  "version": "${version}",
+  "name": "Storyboard Displays",
+  "description": "Place smooth PNG artwork and Minecraft-style title cards in the world.",
+  "authors": ["wiiuavi"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.wiiuavi.storyboard.StoryboardDisplaysClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.1.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
+}
