@@ -12,6 +12,12 @@ loom {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}
+
+		loom {
+			mixin {
+				defaultRefmapName = "storyboard_displays.refmap.json"
+			}
+		}
 	}
 }
 

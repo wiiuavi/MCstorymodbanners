@@ -14,6 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.BlockHitResult;
 import org.joml.Quaternionf;
 
 import java.io.IOException;
@@ -25,11 +26,13 @@ import java.util.Map;
 public final class DisplayRenderer {
 	private static final Map<String, Identifier> textures = new HashMap<>();
 	private static final Map<String, Boolean> failedTextures = new HashMap<>();
+	private static final Map<String, Float> aspectRatios = new HashMap<>();
 
 	private DisplayRenderer() {}
 
 	public static void init() {
-		LevelRenderEvents.AFTER_SOLID_FEATURES.register(DisplayRenderer::render);
+		LevelRenderEvents.AFTER_SOLID_FEATURES.register(DisplayRenderer::renderDisplays);
+		LevelRenderEvents.BEFORE_GIZMOS.register(DisplayRenderer::renderGizmos);
 	}
 
 	public static void logImageDiagnostics(String path) {
@@ -52,7 +55,7 @@ public final class DisplayRenderer {
 		}
 	}
 
-	private static void render(LevelRenderContext context) {
+	private static void renderDisplays(LevelRenderContext context) {
 		Minecraft client = Minecraft.getInstance();
 		if (!StoryboardStore.isVisible() || client.level == null || client.player == null) return;
 		Vec3 camera = client.gameRenderer.getMainCamera().position();
@@ -60,14 +63,120 @@ public final class DisplayRenderer {
 		MultiBufferSource buffers = context.bufferSource();
 
 		for (Display display : StoryboardStore.displays()) {
+			if (display.hidden) continue;
 			if (!display.dimension.equals(client.level.dimension().identifier().toString())) continue;
 			if (display.position().distanceToSqr(camera) > 4096.0) continue;
 			pose.pushPose();
 			pose.translate(display.x - camera.x, display.y - camera.y, display.z - camera.z);
 			orient(pose, display.facing);
+			pose.mulPose(new Quaternionf()
+					.rotateX((float) Math.toRadians(display.rotationX))
+					.rotateY((float) Math.toRadians(display.rotationY))
+					.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
 			renderCard(display, pose, buffers);
 			pose.popPose();
 		}
+	}
+
+	private static void renderGizmos(LevelRenderContext context) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.screen != null || !TransformController.active() || !StoryboardStore.isVisible()
+				|| client.level == null || client.player == null) return;
+		Vec3 camera = client.gameRenderer.getMainCamera().position();
+		PoseStack pose = context.poseStack();
+		MultiBufferSource buffers = context.bufferSource();
+		for (Display display : StoryboardStore.selectedDisplays()) {
+			if (display.hidden || !display.dimension.equals(client.level.dimension().identifier().toString())) continue;
+			if (display.position().distanceToSqr(camera) > 4096.0) continue;
+			pose.pushPose();
+			pose.translate(display.x - camera.x, display.y - camera.y, display.z - camera.z);
+			orient(pose, display.facing);
+			pose.mulPose(new Quaternionf()
+					.rotateX((float) Math.toRadians(display.rotationX))
+					.rotateY((float) Math.toRadians(display.rotationY))
+					.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
+			renderGizmo(display, pose, buffers, TransformController.handleAtCrosshair(client, display));
+			pose.popPose();
+		}
+	}
+
+	private static void renderGhostOutline(Display display, PoseStack pose, MultiBufferSource buffers) {
+		var matrix = pose.last().pose();
+		var border = buffers.getBuffer(RenderTypes.debugQuads());
+		float thickness = 0.035f;
+		int color = 0x9955D9FF;
+		borderQuad(border, matrix, 0, 0, display.width, thickness, color);
+		borderQuad(border, matrix, 0, display.height - thickness, display.width, display.height, color);
+		borderQuad(border, matrix, 0, 0, thickness, display.height, color);
+		borderQuad(border, matrix, display.width - thickness, 0, display.width, display.height, color);
+	}
+
+	private static void renderGizmo(Display display, PoseStack pose, MultiBufferSource buffers,
+			TransformController.Handle hovered) {
+		var matrix = pose.last().pose();
+		var border = buffers.getBuffer(RenderTypes.debugQuads());
+		float handle = Math.min(0.12f, Math.max(0.05f, Math.min(display.width, display.height) * 0.08f));
+		int normal = 0xFF4DB6FF;
+		int hot = 0xFFFFE066;
+		float frameWidth = contentWidth(display);
+		float frameHeight = contentHeight(display);
+		borderQuad(border, matrix, 0, 0, frameWidth, 0.025f, 0xFF55D9FF);
+		borderQuad(border, matrix, 0, frameHeight - 0.025f, frameWidth, frameHeight, 0xFF55D9FF);
+		borderQuad(border, matrix, 0, 0, 0.025f, frameHeight, 0xFF55D9FF);
+		borderQuad(border, matrix, frameWidth - 0.025f, 0, frameWidth, frameHeight, 0xFF55D9FF);
+		switch (TransformController.mode()) {
+			case MOVE -> {
+				gizmoBox(border, matrix, frameWidth / 2, frameHeight / 2, handle, normal,
+						hovered == TransformController.Handle.MOVE_DEPTH ? hot : normal);
+				gizmoBox(border, matrix, frameWidth / 2, frameHeight + 0.3f, handle, normal,
+						hovered == TransformController.Handle.MOVE_VERTICAL ? hot : normal);
+				gizmoBox(border, matrix, frameWidth + 0.3f, frameHeight / 2, handle, normal,
+						hovered == TransformController.Handle.MOVE_HORIZONTAL ? hot : normal);
+			}
+			case SCALE -> {
+				gizmoBox(border, matrix, 0, 0, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
+				gizmoBox(border, matrix, frameWidth, 0, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
+				gizmoBox(border, matrix, 0, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
+				gizmoBox(border, matrix, frameWidth, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
+				gizmoBox(border, matrix, frameWidth / 2, frameHeight / 2, handle, normal,
+						hovered == TransformController.Handle.SCALE ? hot : normal);
+			}
+			case ROTATE -> {
+				gizmoBox(border, matrix, frameWidth / 2, frameHeight + 0.3f, handle, 0xFFFF5C5C,
+						hovered == TransformController.Handle.ROTATE_Y ? hot : 0xFFFF5C5C);
+				gizmoBox(border, matrix, frameWidth + 0.3f, frameHeight / 2, handle, 0xFF72E06A,
+						hovered == TransformController.Handle.ROTATE_X ? hot : 0xFF72E06A);
+				gizmoBox(border, matrix, frameWidth / 2, -0.3f, handle, 0xFFB77CFF,
+						hovered == TransformController.Handle.ROTATE_Z ? hot : 0xFFB77CFF);
+			}
+			default -> {}
+		}
+	}
+
+	public static float contentWidth(Display display) {
+		float textWidth = display.text == null || display.text.isBlank()
+				? 0 : Minecraft.getInstance().font.width(Component.literal(display.text))
+				* display.textScale / 16.0f;
+		return Math.max(display.width, textWidth);
+	}
+
+	public static float contentHeight(Display display) {
+		float textHeight = display.text == null || display.text.isBlank()
+				? 0 : 10.0f * display.textScale / 16.0f;
+		return Math.max(display.height, textHeight);
+	}
+
+	private static void gizmoBox(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+			float centerX, float centerY, float size, int normal, int color) {
+		borderQuad(builder, matrix, centerX - size, centerY - size, centerX + size, centerY + size, color);
+	}
+
+	private static void borderQuad(com.mojang.blaze3d.vertex.VertexConsumer builder,
+			org.joml.Matrix4f matrix, float x1, float y1, float x2, float y2, int color) {
+		vertex(builder, matrix, x1, y1, 0.002f, 0, 0).setColor(color);
+		vertex(builder, matrix, x2, y1, 0.002f, 1, 0).setColor(color);
+		vertex(builder, matrix, x2, y2, 0.002f, 1, 1).setColor(color);
+		vertex(builder, matrix, x1, y2, 0.002f, 0, 1).setColor(color);
 	}
 
 	private static void renderCard(Display display, PoseStack pose, MultiBufferSource buffers) {
@@ -144,6 +253,7 @@ public final class DisplayRenderer {
 		if (!file.isAbsolute()) {
 			file = Minecraft.getInstance().gameDirectory.toPath().resolve("storyboard-displays").resolve(path);
 		}
+
 		try {
 			NativeImage image = NativeImage.read(Files.newInputStream(file));
 			Identifier id = Identifier.fromNamespaceAndPath(StoryboardDisplays.MOD_ID,
@@ -157,6 +267,21 @@ public final class DisplayRenderer {
 			failedTextures.put(path, true);
 			StoryboardDisplays.LOGGER.warn("Could not load storyboard PNG {}", file, exception);
 			return null;
+		}
+	}
+
+	public static float imageAspectRatio(String path) {
+		if (path == null || path.isBlank()) return 16.0f / 9.0f;
+		Float cached = aspectRatios.get(path);
+		if (cached != null) return cached;
+		Path file = Path.of(path);
+		if (!file.isAbsolute()) file = Minecraft.getInstance().gameDirectory.toPath().resolve("storyboard-displays").resolve(path);
+		try (NativeImage image = NativeImage.read(Files.newInputStream(file))) {
+			float ratio = image.getWidth() / (float) image.getHeight();
+			aspectRatios.put(path, ratio);
+			return ratio;
+		} catch (IOException | RuntimeException exception) {
+			return 16.0f / 9.0f;
 		}
 	}
 }

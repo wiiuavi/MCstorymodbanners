@@ -8,9 +8,15 @@ import java.util.UUID;
 
 public final class Display {
 	public UUID id = UUID.randomUUID();
+	public String name = "Untitled display";
+	public boolean hidden;
 	public String dimension = "";
 	public double x, y, z;
 	public Direction facing = Direction.NORTH;
+	public float rotation;
+	public float rotationX;
+	public float rotationY;
+	public float rotationZ;
 	public float width = 4.0f;
 	public float height = 2.25f;
 	public String imagePath = "";
