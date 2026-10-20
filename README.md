@@ -51,4 +51,4 @@ gradle build
 The current release is **1.3.2**, producing
 `build/libs/storyboard-displays-1.3.2.jar`. Future feature/fix builds will
 increment the patch number (1.2.1, 1.2.2, and so on). Install it with Fabric Loader 0.19.5
-or newer, Fabric API for Minecraft 26.1.2, and Mod Menu (optional).
+or newer, Fabric API for Minecraft 26.1.2, and Mod Menu (optional). This mod was heavily made using AI and NOT POLISHED! Bugs will be seen! feel free to make your own fork, fix and fix them, so long as you declare changes you made and link back to this mod!
