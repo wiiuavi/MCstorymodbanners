@@ -25,6 +25,13 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-windows"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-windows-arm64"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-linux"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-linux-arm64"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-macos"))
+	include(implementation("org.lwjgl:lwjgl-nfd:3.3.3:natives-macos-arm64"))
 }
 
 processResources {

@@ -4,6 +4,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.Direction;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 public final class TransformController {
 	public enum Mode { OFF, MOVE, SCALE, ROTATE }
@@ -20,7 +22,9 @@ public final class TransformController {
 	private static boolean mouseUnlocked;
 	private static Space space = Space.PLAYER;
 	public enum Handle {
-		NONE, MOVE_DEPTH, MOVE_VERTICAL, MOVE_HORIZONTAL, SCALE, ROTATE_X, ROTATE_Y, ROTATE_Z
+		NONE, MOVE_DEPTH, MOVE_VERTICAL, MOVE_HORIZONTAL, SCALE,
+		SCALE_TOP_LEFT, SCALE_TOP_RIGHT, SCALE_BOTTOM_LEFT, SCALE_BOTTOM_RIGHT,
+		ROTATE_X, ROTATE_Y, ROTATE_Z
 	}
 
 	private TransformController() {}
@@ -30,7 +34,7 @@ public final class TransformController {
 	public static Space space() { return space; }
 	public static boolean mouseUnlocked() { return mouseUnlocked; }
 	public static Handle hoveredHandle(Minecraft client) {
-		return handleAtCrosshair(client, StoryboardStore.selected());
+		return handleAtCursor(client, StoryboardStore.selected());
 	}
 	public static void mouseButton(boolean pressed) {
 		leftPressed = pressed;
@@ -93,6 +97,7 @@ public final class TransformController {
 			leftWasPressed = false;
 			return;
 		}
+		client.options.keyShift.setDown(false);
 		if (!mouseUnlocked) return;
 		boolean pressed = leftPressed;
 		if (pressed && !leftWasPressed) {
@@ -100,7 +105,7 @@ public final class TransformController {
 			if (underCursor != null && !StoryboardStore.isSelected(underCursor)) {
 				StoryboardStore.select(underCursor);
 			}
-			dragPart = handleAtCrosshair(client, StoryboardStore.selected());
+			dragPart = handleAtCursor(client, StoryboardStore.selected());
 			dragging = dragPart != Handle.NONE;
 		}
 		leftWasPressed = pressed;
@@ -127,7 +132,7 @@ public final class TransformController {
 		boolean changed = switch (dragPart) {
 			case MOVE_DEPTH, MOVE_VERTICAL, MOVE_HORIZONTAL -> move(client, dx, dy);
 			case ROTATE_X, ROTATE_Y, ROTATE_Z -> rotate(dx, client);
-			case SCALE -> scale(dx, dy);
+			case SCALE, SCALE_TOP_LEFT, SCALE_TOP_RIGHT, SCALE_BOTTOM_LEFT, SCALE_BOTTOM_RIGHT -> scale(dx, dy);
 			default -> false;
 		};
 		if (changed && ++ticksSinceSave >= 4) {
@@ -137,46 +142,88 @@ public final class TransformController {
 	}
 
 	public static Handle handleAtCrosshair(Minecraft client, Display display) {
+		return handleAtCursor(client, display);
+	}
+
+	public static Handle handleAtCursor(Minecraft client, Display display) {
 		if (display == null || !active()) return Handle.NONE;
-		Vec3 hit = cursorOnDisplay(client, display);
-		if (hit == null) return Handle.NONE;
-		double[] local = localCoordinates(display, hit);
-		double localX = local[0];
-		double localY = local[1];
 		double width = DisplayRenderer.contentWidth(display);
 		double height = DisplayRenderer.contentHeight(display);
-		double edge = Math.max(0.12, Math.min(width, height) * 0.12);
+		double mouseX = client.mouseHandler.getScaledXPos(client.getWindow());
+		double mouseY = client.mouseHandler.getScaledYPos(client.getWindow());
+		double screenWidth = client.getWindow().getGuiScaledWidth();
+		double screenHeight = client.getWindow().getGuiScaledHeight();
+		Handle[] handles = handlesFor(width, height);
+		double best = 18.0 * 18.0;
+		Handle result = Handle.NONE;
+		for (Handle handle : handles) {
+			Vec3 screen = client.gameRenderer.projectPointToScreen(
+					localToWorld(display, handleX(handle, width, height), handleY(handle, width, height)));
+			double projectedX = (screen.x + 1.0) * screenWidth * 0.5;
+			double projectedY = (1.0 - screen.y) * screenHeight * 0.5;
+			double dx = projectedX - mouseX;
+			double dy = projectedY - mouseY;
+			double distance = dx * dx + dy * dy;
+			if (screen.z >= -1 && screen.z <= 1 && distance < best) {
+				best = distance;
+				result = handle;
+			}
+		}
+		return result;
+	}
+
+	private static Handle[] handlesFor(double width, double height) {
 		return switch (mode) {
-			case MOVE -> {
-				if (localX >= width * 0.5 - edge && localX <= width * 0.5 + edge
-						&& localY >= height * 0.5 - edge && localY <= height * 0.5 + edge) {
-					yield Handle.MOVE_DEPTH;
-				}
-				if (Math.abs(localX - width / 2) < edge
-						&& localY > height - edge && localY < height + 0.7) {
-					yield Handle.MOVE_VERTICAL;
-				}
-				if (localX > width - edge && localX < width + 0.7
-						&& Math.abs(localY - height / 2) < edge) {
-					yield Handle.MOVE_HORIZONTAL;
-				}
-				yield Handle.NONE;
-			}
-			case SCALE -> {
-				boolean inside = localX >= -edge && localX <= width + edge
-						&& localY >= -edge && localY <= height + edge;
-				yield inside ? Handle.SCALE : Handle.NONE;
-			}
-			case ROTATE -> {
-				if (localY > height - edge && localY < height + 0.7
-						&& Math.abs(localX - width / 2) < edge) yield Handle.ROTATE_Y;
-				if (localX > width - edge && localX < width + 0.7
-						&& Math.abs(localY - height / 2) < edge) yield Handle.ROTATE_X;
-				if (localY < edge && Math.abs(localX - width / 2) < edge) yield Handle.ROTATE_Z;
-				yield Handle.NONE;
-			}
-			default -> Handle.NONE;
+			case MOVE -> new Handle[] {Handle.MOVE_DEPTH, Handle.MOVE_VERTICAL, Handle.MOVE_HORIZONTAL};
+			case SCALE -> new Handle[] {Handle.SCALE_TOP_LEFT, Handle.SCALE_TOP_RIGHT,
+					Handle.SCALE_BOTTOM_LEFT, Handle.SCALE_BOTTOM_RIGHT, Handle.SCALE};
+			case ROTATE -> new Handle[] {Handle.ROTATE_Z, Handle.ROTATE_Y, Handle.ROTATE_X};
+			default -> new Handle[0];
 		};
+	}
+
+	private static double handleX(Handle handle, double width, double height) {
+		return switch (handle) {
+			case MOVE_VERTICAL, ROTATE_Y -> width * 0.5;
+			case MOVE_HORIZONTAL, ROTATE_X -> width + 0.3;
+			case ROTATE_Z -> -0.3;
+			case SCALE_TOP_LEFT, SCALE_BOTTOM_LEFT -> 0;
+			case SCALE_TOP_RIGHT, SCALE_BOTTOM_RIGHT -> width;
+			default -> width * 0.5;
+		};
+	}
+
+	private static double handleY(Handle handle, double width, double height) {
+		return switch (handle) {
+			case MOVE_DEPTH, SCALE -> height * 0.5;
+			case MOVE_VERTICAL, ROTATE_Y -> height + 0.3;
+			case MOVE_HORIZONTAL, ROTATE_X -> height * 0.5;
+			case ROTATE_Z -> height + 0.3;
+			case SCALE_TOP_LEFT, SCALE_TOP_RIGHT -> 0;
+			case SCALE_BOTTOM_LEFT, SCALE_BOTTOM_RIGHT -> height;
+			default -> height * 0.5;
+		};
+	}
+
+	private static Vec3 localToWorld(Display display, double localX, double localY) {
+		double width = display.width;
+		double height = display.height;
+		Vector3f point = new Vector3f((float) (localX - width * 0.5), (float) (localY - height * 0.5), 0);
+		point.rotate(new Quaternionf()
+				.rotateX((float) Math.toRadians(display.rotationX))
+				.rotateY((float) Math.toRadians(display.rotationY))
+				.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
+		point.add((float) width * 0.5f, (float) height * 0.5f, 0);
+		Quaternionf facing = switch (display.facing) {
+			case NORTH -> new Quaternionf().rotateY((float) Math.PI);
+			case WEST -> new Quaternionf().rotateY((float) -Math.PI / 2);
+			case EAST -> new Quaternionf().rotateY((float) Math.PI / 2);
+			case UP -> new Quaternionf().rotateX((float) -Math.PI / 2);
+			case DOWN -> new Quaternionf().rotateX((float) Math.PI / 2);
+			default -> new Quaternionf();
+		};
+		point.rotate(facing);
+		return new Vec3(display.x + point.x, display.y + point.y, display.z + point.z);
 	}
 
 	public static Vec3 cursorOnDisplay(Minecraft client, Display display) {
@@ -239,6 +286,10 @@ public final class TransformController {
 			forward = new Vec3(-Math.sin(yaw), 0, Math.cos(yaw));
 			right = new Vec3(Math.cos(yaw), 0, Math.sin(yaw));
 		}
+		if (space == Space.PLAYER) {
+			forward = cardinalize(forward);
+			right = new Vec3(-forward.z, 0, forward.x);
+		}
 		Vec3 up = new Vec3(0, 1, 0);
 		double sensitivity = client.player.isCrouching() ? 0.0025 : 0.01;
 		Vec3 delta = switch (dragPart) {
@@ -246,15 +297,18 @@ public final class TransformController {
 			case MOVE_VERTICAL -> up.scale(-dy * sensitivity);
 			default -> forward.scale(-dy * sensitivity);
 		};
-		if (client.hasShiftDown()) {
-			delta = new Vec3(snap(delta.x), snap(delta.y), snap(delta.z));
-		}
 		for (Display display : StoryboardStore.selectedDisplays()) {
 			display.x += delta.x;
 			display.y += delta.y;
 			display.z += delta.z;
 		}
 		return delta.lengthSqr() > 0;
+	}
+
+	private static Vec3 cardinalize(Vec3 vector) {
+		return Math.abs(vector.x) >= Math.abs(vector.z)
+				? new Vec3(Math.copySign(1, vector.x), 0, 0)
+				: new Vec3(0, 0, Math.copySign(1, vector.z));
 	}
 
 	private static float displayYaw() {
@@ -272,6 +326,11 @@ public final class TransformController {
 		float amount = (float) ((dx - dy) * 0.01);
 		if (Math.abs(amount) < 0.001f) return false;
 		for (Display display : StoryboardStore.selectedDisplays()) {
+			if (display.text != null && !display.text.isBlank()
+				&& (display.imagePath == null || display.imagePath.isBlank())) {
+			display.textScale = Math.max(0.05f, display.textScale + amount);
+			continue;
+			}
 			float originalWidth = display.width;
 			display.width = Math.max(0.05f, display.width + amount);
 			if (Minecraft.getInstance().hasControlDown()) {
@@ -280,12 +339,36 @@ public final class TransformController {
 				float ratio = display.height / Math.max(0.05f, originalWidth);
 				display.height = Math.max(0.05f, display.width * ratio);
 			}
-			if (Minecraft.getInstance().hasShiftDown()) {
-				display.width = snap(display.width);
-				display.height = snap(display.height);
-			}
+
 		}
 		return true;
+	}
+
+	public static void resetMove() {
+		for (Display display : StoryboardStore.selectedDisplays()) {
+			display.x = display.resetX;
+			display.y = display.resetY;
+			display.z = display.resetZ;
+		}
+		StoryboardStore.save();
+	}
+
+	public static void resetScale() {
+		for (Display display : StoryboardStore.selectedDisplays()) {
+			display.width = display.resetWidth;
+			display.height = display.resetHeight;
+		}
+		StoryboardStore.save();
+	}
+
+	public static void resetRotation() {
+		for (Display display : StoryboardStore.selectedDisplays()) {
+			display.rotation = 0;
+			display.rotationX = 0;
+			display.rotationY = 0;
+			display.rotationZ = 0;
+		}
+		StoryboardStore.save();
 	}
 
 	private static boolean rotate(double dx, Minecraft client) {
@@ -297,21 +380,8 @@ public final class TransformController {
 				case ROTATE_Y -> display.rotationY += step;
 				default -> display.rotationZ += step;
 			}
-			if (client.hasShiftDown()) {
-				display.rotationX = Math.round(display.rotationX / 45.0f) * 45.0f;
-				display.rotationY = Math.round(display.rotationY / 45.0f) * 45.0f;
-				display.rotationZ = Math.round(display.rotationZ / 45.0f) * 45.0f;
-			}
 		}
 		return true;
-	}
-
-	private static double snap(double value) {
-		return Math.round(value * 2.0) / 2.0;
-	}
-
-	private static float snap(float value) {
-		return Math.max(0.05f, Math.round(value * 2.0f) / 2.0f);
 	}
 
 	private static void message(String value) {

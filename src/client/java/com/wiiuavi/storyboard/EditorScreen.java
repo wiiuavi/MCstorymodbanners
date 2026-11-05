@@ -1,5 +1,6 @@
 package com.wiiuavi.storyboard;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -8,6 +9,9 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
 
 public final class EditorScreen extends Screen {
 	private EditBox name;
@@ -22,6 +26,16 @@ public final class EditorScreen extends Screen {
 	private int scrollOffset;
 	private int tab;
 	private Button gizmoModeButton;
+	private String pendingImagePath;
+	private Display draftDisplay;
+	private String draftName;
+	private String draftImage;
+	private String draftText;
+	private String draftWidth;
+	private String draftHeight;
+	private String draftTextScale;
+	private String draftColor;
+	private boolean draftCaptured;
 
 	public EditorScreen() {
 		super(Component.literal("Storyboard Displays • Director"));
@@ -50,7 +64,7 @@ public final class EditorScreen extends Screen {
 					+ (StoryboardStore.isVisible() ? "ON" : "OFF")), ignored -> {
 				StoryboardStore.setVisible(!StoryboardStore.isVisible());
 				refresh();
-			}).bounds(left, 258, 280, 22).build());
+			}).bounds(left, 258 - scrollOffset, 280, 22).build());
 
 			int y = 305 - scrollOffset;
 			for (Display display : StoryboardStore.displays()) {
@@ -105,20 +119,23 @@ public final class EditorScreen extends Screen {
 
 	private void addForm(int x, Display selected) {
 		int y = 64 - scrollOffset;
+		boolean useDraft = draftCaptured && selected == draftDisplay;
 		name = addField(x, y + 34, "Display name", "A friendly name shown in the display list.",
-				selected == null ? "Untitled display" : selected.name, 256);
+				useDraft ? draftName : selected == null ? "Untitled display" : selected.name, 256);
 		image = addField(x, y + 90, "Image file", "PNG path, absolute or relative to .minecraft/storyboard-displays.",
-				selected == null ? "" : selected.imagePath, 1024);
+				pendingImagePath != null ? pendingImagePath : useDraft ? draftImage : (selected == null ? "" : selected.imagePath), 1024);
+		addRenderableWidget(Button.builder(Component.literal("Load PNG..."), button ->
+				loadPngFile()).bounds(x + 286, y + 90, 105, 22).build());
 		text = addField(x, y + 146, "Title text", "Optional Minecraft-style text drawn on the display.",
-				selected == null ? "" : selected.text, 512);
+				useDraft ? draftText : selected == null ? "" : selected.text, 512);
 		widthField = addField(x, y + 202, "Width in blocks", "How wide the display is in the world.",
-				selected == null ? "4.0" : Float.toString(selected.width), 32);
+				useDraft ? draftWidth : selected == null ? "4.0" : Float.toString(selected.width), 32);
 		heightField = addField(x, y + 258, "Height in blocks", "How tall the display is; image width follows its aspect ratio when placing.",
-				selected == null ? "2.25" : Float.toString(selected.height), 32);
+				useDraft ? draftHeight : selected == null ? "2.25" : Float.toString(selected.height), 32);
 		textScale = addField(x, y + 314, "Text scale", "Multiplier for the optional title text.",
-				selected == null ? "1.0" : Float.toString(selected.textScale), 32);
+				useDraft ? draftTextScale : selected == null ? "1.0" : Float.toString(selected.textScale), 32);
 		color = addField(x, y + 370, "ARGB color", "Tint for text and fallback artwork, such as FFFFFFFF.",
-				selected == null ? "FFFFFFFF" : Integer.toHexString(selected.color), 16);
+				useDraft ? draftColor : selected == null ? "FFFFFFFF" : Integer.toHexString(selected.color), 16);
 		addRenderableWidget(Button.builder(Component.literal("Rotate 90°  [" + facing.getName() + "]"), button -> {
 			facing = switch (facing) {
 				case NORTH -> Direction.EAST;
@@ -136,7 +153,7 @@ public final class EditorScreen extends Screen {
 	}
 
 	private void addTransformPanel(int left, int right, Display selected) {
-		int y = 78;
+		int y = 78 - scrollOffset;
 		addRenderableWidget(button("Select next", "Select the next visible display.", left, y));
 		addRenderableWidget(button("Select all visible", "Select all displays for group movement.", left, y + 30));
 		addRenderableWidget(button("Delete selected", "Delete the selected display group.", left, y + 60));
@@ -154,8 +171,20 @@ public final class EditorScreen extends Screen {
 				}).bounds(left, y + 130, 280, 22).build());
 		addRenderableWidget(Button.builder(Component.literal("Rotate 90°"), button -> rotateSelected())
 				.bounds(left, y + 160, 280, 22).build());
+		addRenderableWidget(Button.builder(Component.literal("Reset move"), button -> {
+			TransformController.resetMove();
+			refresh();
+		}).bounds(left, y + 190, 90, 22).build());
+		addRenderableWidget(Button.builder(Component.literal("Reset scale"), button -> {
+			TransformController.resetScale();
+			refresh();
+		}).bounds(left + 95, y + 190, 90, 22).build());
+		addRenderableWidget(Button.builder(Component.literal("Reset rotation"), button -> {
+			TransformController.resetRotation();
+			refresh();
+		}).bounds(left + 190, y + 190, 90, 22).build());
 		addRenderableWidget(Button.builder(Component.literal("Close"), button -> onClose())
-				.bounds(left, y + 196, 280, 22).build());
+				.bounds(left, y + 220, 280, 22).build());
 		if (selected != null) {
 			addForm(right, selected);
 		} else {
@@ -198,6 +227,8 @@ public final class EditorScreen extends Screen {
 		}
 		display.name = name.getValue().isBlank() ? "Untitled display" : name.getValue();
 		display.imagePath = image.getValue().trim();
+		pendingImagePath = null;
+		clearDraft();
 		display.text = text.getValue();
 		display.width = number(widthField.getValue(), display.width);
 		display.height = number(heightField.getValue(), display.height);
@@ -207,8 +238,46 @@ public final class EditorScreen extends Screen {
 		display.textScale = number(textScale.getValue(), display.textScale);
 		display.color = parseColor(color.getValue(), display.color);
 		display.facing = facing;
+		if (display.resetWidth <= 0) {
+			display.resetWidth = display.width;
+			display.resetHeight = display.height;
+		}
 		StoryboardStore.save();
 		refresh();
+	}
+
+	public void chooseImage(String path) {
+		pendingImagePath = path;
+		minecraft.setScreen(this);
+	}
+
+	private void loadPngFile() {
+		Path folder = Minecraft.getInstance().gameDirectory.toPath().resolve("storyboard-displays");
+		try {
+			Files.createDirectories(folder);
+			try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+				if (org.lwjgl.util.nfd.NativeFileDialog.NFD_Init() != org.lwjgl.util.nfd.NativeFileDialog.NFD_OKAY) {
+					throw new IOException("Native file dialog initialization failed: "
+							+ org.lwjgl.util.nfd.NativeFileDialog.NFD_GetError());
+				}
+				try {
+					org.lwjgl.PointerBuffer result = stack.mallocPointer(1);
+					org.lwjgl.util.nfd.NFDFilterItem.Buffer filters =
+							org.lwjgl.util.nfd.NFDFilterItem.malloc(1, stack);
+					filters.get(0).name(stack.UTF8("PNG image")).spec(stack.UTF8("png"));
+					int status = org.lwjgl.util.nfd.NativeFileDialog.NFD_OpenDialog(
+							result, filters, folder.toString());
+					if (status == org.lwjgl.util.nfd.NativeFileDialog.NFD_OKAY) {
+						chooseImage(result.getStringUTF8(0));
+						org.lwjgl.util.nfd.NativeFileDialog.NFD_FreePath(result.get(0));
+					}
+				} finally {
+					org.lwjgl.util.nfd.NativeFileDialog.NFD_Quit();
+				}
+			}
+		} catch (IOException | RuntimeException exception) {
+			StoryboardDisplays.LOGGER.warn("Could not open storyboard PNG chooser", exception);
+		}
 	}
 
 	private void placeNew() {
@@ -224,6 +293,33 @@ public final class EditorScreen extends Screen {
 		tab = value;
 		scrollOffset = 0;
 		refresh();
+	}
+
+	private void captureDraft() {
+		Display selected = StoryboardStore.selected();
+		if (name == null || image == null || text == null || widthField == null
+				|| heightField == null || textScale == null || color == null) return;
+		draftDisplay = selected;
+		draftName = name.getValue();
+		draftImage = image.getValue();
+		draftText = text.getValue();
+		draftWidth = widthField.getValue();
+		draftHeight = heightField.getValue();
+		draftTextScale = textScale.getValue();
+		draftColor = color.getValue();
+		draftCaptured = true;
+	}
+
+	private void clearDraft() {
+		draftDisplay = null;
+		draftName = null;
+		draftImage = null;
+		draftText = null;
+		draftWidth = null;
+		draftHeight = null;
+		draftTextScale = null;
+		draftColor = null;
+		draftCaptured = false;
 	}
 
 	private void refresh() {
@@ -251,17 +347,19 @@ public final class EditorScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
 		graphics.fill(14, 10, this.width - 14, this.height - 10, 0xCC10151E);
+		graphics.enableScissor(14, 28, this.width - 14, this.height - 28);
 		super.extractRenderState(graphics, mouseX, mouseY, delta);
+		graphics.disableScissor();
 		graphics.centeredText(font, title, this.width / 2, 14, 0xFFFFFFFF);
 		graphics.text(font, "Choose a tab. Hover controls for an explanation. Scroll over a panel for more options.",
 				24, 62, 0xFFB8C9D9);
 		graphics.text(font, tab == 0 ? "DISPLAYS • library and artwork" : "TRANSFORM • position and orientation",
 				this.width - 330, 42, 0xFF80C8FF);
-		graphics.text(font, "G cycles gizmo • P unlocks/locks mouse • Player/Display space • Shift snaps • Ctrl unlocks ratio",
+		graphics.text(font, "G cycles gizmo • P unlocks/locks mouse • Player/Display space • Ctrl unlocks ratio",
 				24, this.height - 18, 0xFF9AA8B5);
 		if (TransformController.active() && minecraft != null) {
 			graphics.text(font, "GIZMO: " + TransformController.mode().name()
-					+ "  •  HOVER: " + TransformController.hoveredHandle(minecraft).name()
+					+ "  •  HOVER: GUI"
 					+ "  •  MOUSE: " + (TransformController.mouseUnlocked() ? "UNLOCKED" : "LOCKED"),
 					24, this.height - 34, 0xFFFFE066);
 		}
@@ -270,6 +368,7 @@ public final class EditorScreen extends Screen {
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
 		if (mouseX < this.width - 20) {
+			captureDraft();
 			scrollOffset = Math.max(0, Math.min(700, scrollOffset - (int) (vertical * 32)));
 			clearWidgets();
 			init();

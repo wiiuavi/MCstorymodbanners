@@ -1,4 +1,5 @@
 {
+  "key.categories.storyboard_displays.controls": "Storyboard Displays",
   "key.storyboard_displays.editor": "Open Storyboard Displays editor",
   "key.storyboard_displays.toggle": "Unlock/lock mouse for gizmo editing",
   "key.storyboard_displays.transform": "Cycle director gizmo (off/move/scale/rotate)",

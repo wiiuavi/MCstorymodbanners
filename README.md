@@ -48,7 +48,7 @@ Requires Java 25 and Gradle 9.7 or newer:
 gradle build
 ```
 
-The current release is **1.3.2**, producing
-`build/libs/storyboard-displays-1.3.2.jar`. Future feature/fix builds will
+The current release is **1.4.5**, producing
+`build/libs/storyboard-displays-1.4.5.jar`. Future feature/fix builds will
 increment the patch number (1.2.1, 1.2.2, and so on). Install it with Fabric Loader 0.19.5
 or newer, Fabric API for Minecraft 26.1.2, and Mod Menu (optional).

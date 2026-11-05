@@ -6,6 +6,7 @@
   "description": "Place smooth PNG artwork and Minecraft-style title cards in the world.",
   "authors": ["wiiuavi"],
   "license": "MIT",
+  "icon": "assets/storyboard_displays/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": ["com.wiiuavi.storyboard.StoryboardDisplaysClient"]

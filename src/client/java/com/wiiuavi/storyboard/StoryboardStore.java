@@ -97,6 +97,11 @@ public final class StoryboardStore {
 		display.facing = hit.getDirection();
 		display.dimension = client.level.dimension().identifier().toString();
 		display.name = "Display " + (displays.size() + 1);
+		display.resetX = display.x;
+		display.resetY = display.y;
+		display.resetZ = display.z;
+		display.resetWidth = display.width;
+		display.resetHeight = display.height;
 		displays.add(display);
 		select(display);
 		save();

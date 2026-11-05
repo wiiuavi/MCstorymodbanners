@@ -35,6 +35,10 @@ public final class DisplayRenderer {
 		LevelRenderEvents.BEFORE_GIZMOS.register(DisplayRenderer::renderGizmos);
 	}
 
+	public static Identifier previewTexture(String path) {
+		return texture(path);
+	}
+
 	public static void logImageDiagnostics(String path) {
 		if (path == null || path.isBlank()) {
 			StoryboardDisplays.LOGGER.info("Storyboard image diagnostics: no path supplied");
@@ -69,10 +73,7 @@ public final class DisplayRenderer {
 			pose.pushPose();
 			pose.translate(display.x - camera.x, display.y - camera.y, display.z - camera.z);
 			orient(pose, display.facing);
-			pose.mulPose(new Quaternionf()
-					.rotateX((float) Math.toRadians(display.rotationX))
-					.rotateY((float) Math.toRadians(display.rotationY))
-					.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
+			applyDisplayRotation(pose, display);
 			renderCard(display, pose, buffers);
 			pose.popPose();
 		}
@@ -91,10 +92,7 @@ public final class DisplayRenderer {
 			pose.pushPose();
 			pose.translate(display.x - camera.x, display.y - camera.y, display.z - camera.z);
 			orient(pose, display.facing);
-			pose.mulPose(new Quaternionf()
-					.rotateX((float) Math.toRadians(display.rotationX))
-					.rotateY((float) Math.toRadians(display.rotationY))
-					.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
+			applyDisplayRotation(pose, display);
 			renderGizmo(display, pose, buffers, TransformController.handleAtCrosshair(client, display));
 			pose.popPose();
 		}
@@ -134,20 +132,20 @@ public final class DisplayRenderer {
 						hovered == TransformController.Handle.MOVE_HORIZONTAL ? hot : normal);
 			}
 			case SCALE -> {
-				gizmoBox(border, matrix, 0, 0, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
-				gizmoBox(border, matrix, frameWidth, 0, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
-				gizmoBox(border, matrix, 0, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
-				gizmoBox(border, matrix, frameWidth, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE ? hot : normal);
+				gizmoBox(border, matrix, 0, 0, handle, normal, hovered == TransformController.Handle.SCALE_TOP_LEFT ? hot : normal);
+				gizmoBox(border, matrix, frameWidth, 0, handle, normal, hovered == TransformController.Handle.SCALE_TOP_RIGHT ? hot : normal);
+				gizmoBox(border, matrix, 0, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE_BOTTOM_LEFT ? hot : normal);
+				gizmoBox(border, matrix, frameWidth, frameHeight, handle, normal, hovered == TransformController.Handle.SCALE_BOTTOM_RIGHT ? hot : normal);
 				gizmoBox(border, matrix, frameWidth / 2, frameHeight / 2, handle, normal,
 						hovered == TransformController.Handle.SCALE ? hot : normal);
 			}
 			case ROTATE -> {
+				gizmoBox(border, matrix, -0.3f, frameHeight + 0.3f, handle, 0xFFB77CFF,
+						hovered == TransformController.Handle.ROTATE_Z ? hot : 0xFFB77CFF);
 				gizmoBox(border, matrix, frameWidth / 2, frameHeight + 0.3f, handle, 0xFFFF5C5C,
 						hovered == TransformController.Handle.ROTATE_Y ? hot : 0xFFFF5C5C);
 				gizmoBox(border, matrix, frameWidth + 0.3f, frameHeight / 2, handle, 0xFF72E06A,
 						hovered == TransformController.Handle.ROTATE_X ? hot : 0xFF72E06A);
-				gizmoBox(border, matrix, frameWidth / 2, -0.3f, handle, 0xFFB77CFF,
-						hovered == TransformController.Handle.ROTATE_Z ? hot : 0xFFB77CFF);
 			}
 			default -> {}
 		}
@@ -157,13 +155,28 @@ public final class DisplayRenderer {
 		float textWidth = display.text == null || display.text.isBlank()
 				? 0 : Minecraft.getInstance().font.width(Component.literal(display.text))
 				* display.textScale / 16.0f;
-		return Math.max(display.width, textWidth);
+		return hasImage(display) ? Math.max(display.width, textWidth) : textWidth;
 	}
 
 	public static float contentHeight(Display display) {
 		float textHeight = display.text == null || display.text.isBlank()
-				? 0 : 10.0f * display.textScale / 16.0f;
-		return Math.max(display.height, textHeight);
+				? 0 : Minecraft.getInstance().font.lineHeight * display.textScale / 16.0f;
+		return hasImage(display) ? Math.max(display.height, textHeight) : textHeight;
+	}
+
+	private static boolean hasImage(Display display) {
+		return display.imagePath != null && !display.imagePath.isBlank();
+	}
+
+	private static void applyDisplayRotation(PoseStack pose, Display display) {
+		float width = display.width;
+		float height = display.height;
+		pose.translate(width * 0.5f, height * 0.5f, 0);
+		pose.mulPose(new Quaternionf()
+				.rotateX((float) Math.toRadians(display.rotationX))
+				.rotateY((float) Math.toRadians(display.rotationY))
+				.rotateZ((float) Math.toRadians(display.rotationZ + display.rotation)));
+		pose.translate(-width * 0.5f, -height * 0.5f, 0);
 	}
 
 	private static void gizmoBox(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
@@ -205,15 +218,18 @@ public final class DisplayRenderer {
 			pose.pushPose();
 			// Font quads use the opposite front-face convention to the display quad.
 			// Flip the local text plane so it is readable from the display's front.
+			float worldTextScale = display.textScale / 16.0f;
 			if (display.facing.getAxis().isVertical()) {
+				pose.translate(0, Minecraft.getInstance().font.lineHeight * worldTextScale, 0);
 				pose.mulPose(new Quaternionf().rotateY((float) Math.PI));
 			} else {
+				pose.translate(0, Minecraft.getInstance().font.lineHeight * worldTextScale, 0);
 				pose.mulPose(new Quaternionf().rotateX((float) Math.PI));
 			}
-			pose.scale(display.textScale, display.textScale, display.textScale);
+			pose.scale(worldTextScale, worldTextScale, worldTextScale);
 			Minecraft.getInstance().font.drawInBatch(Component.literal(display.text), 0, 0,
 					display.color, display.emissive, pose.last().pose(), buffers,
-					net.minecraft.client.gui.Font.DisplayMode.NORMAL, 15728880, OverlayTexture.NO_OVERLAY);
+					net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH, 15728880, OverlayTexture.NO_OVERLAY);
 			pose.popPose();
 		}
 	}

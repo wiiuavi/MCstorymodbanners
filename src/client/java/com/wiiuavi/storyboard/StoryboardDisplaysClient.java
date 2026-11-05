@@ -9,6 +9,8 @@ import org.lwjgl.glfw.GLFW;
 
 public final class StoryboardDisplaysClient implements ClientModInitializer {
 	public static final String MOD_ID = "storyboard_displays";
+	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
+			net.minecraft.resources.Identifier.fromNamespaceAndPath(MOD_ID, "controls"));
 	private static KeyMapping editorKey;
 	private static KeyMapping toggleKey;
 	private static KeyMapping transformKey;
@@ -28,9 +30,9 @@ public final class StoryboardDisplaysClient implements ClientModInitializer {
 		StoryboardStore.init();
 		DisplayRenderer.init();
 		editorKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-				"key.storyboard_displays.editor", GLFW.GLFW_KEY_O, KeyMapping.Category.MISC));
+				"key.storyboard_displays.editor", GLFW.GLFW_KEY_O, CATEGORY));
 		toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-				"key.storyboard_displays.toggle", GLFW.GLFW_KEY_P, KeyMapping.Category.MISC));
+				"key.storyboard_displays.toggle", GLFW.GLFW_KEY_P, CATEGORY));
 		transformKey = key("key.storyboard_displays.transform", GLFW.GLFW_KEY_G);
 		selectNextKey = key("key.storyboard_displays.select_next", GLFW.GLFW_KEY_N);
 		deleteKey = key("key.storyboard_displays.delete_selected", GLFW.GLFW_KEY_DELETE);
@@ -56,7 +58,7 @@ public final class StoryboardDisplaysClient implements ClientModInitializer {
 
 	private static KeyMapping key(String translationKey, int keyCode) {
 		return KeyMappingHelper.registerKeyMapping(new KeyMapping(
-				translationKey, keyCode, KeyMapping.Category.MISC));
+				translationKey, keyCode, CATEGORY));
 	}
 
 	public static KeyMapping moveLeftKey() { return moveLeftKey; }

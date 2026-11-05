@@ -24,6 +24,8 @@ public final class Display {
 	public int color = 0xFFFFFFFF;
 	public float textScale = 1.0f;
 	public boolean emissive;
+	public double resetX, resetY, resetZ;
+	public float resetWidth = width, resetHeight = height;
 
 	public Vec3 position() {
 		return new Vec3(x, y, z);
